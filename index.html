@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>G-ESCAPE | 3D room escape room with ThreeJS, Webgl</title>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"
+    />
+    <link type="text/css" rel="stylesheet" href="css/main.css" />
+  </head>
+  <body>
+    <div class="language" id="jsLanguage">
+      <div class="titleWrapper">
+        <h1 style="font-size: 5vw">G-ESCAPE</h1>
+        <h3 style="font-size: 1vw">
+          VR Room Escape Game with Three.js, Webgl, WebXR
+        </h3>
+        <br /><br />
+        <h5>Choose Language</h5>
+        <button class="languageButton korButton" id="korButton">Korean</button>
+        <button class="languageButton engButton" id="engButton">English</button>
+        <br /><br />
+        <input
+          type="checkbox"
+          id="developerMode"
+          name="developer"
+          value="yes"
+        />
+        Developer's mode
+      </div>
+    </div>
+    <div class="story" id="jsStoryStart" style="display: none">
+      <div class="storyText" id="jsStoryStartText" style="display: none"></div>
+      <div class="storyStartBg"></div>
+    </div>
+    <div class="story" id="jsStoryEnd" style="display: none">
+      <div class="storyText" id="jsStoryEndText" style="display: none"></div>
+      <div class="storyEndBg"></div>
+    </div>
+    <div id="blocker">
+      <div id="loading">
+        <div id="jsLoadingBar" class="loadingBar"></div>
+        <div id="jsLoadingText" class="loadingText"></div>
+      </div>
+      <div id="instructions">
+        <span style="font-size: 36px">Click to play</span>
+        <br /><br />
+        Move: WASD<br />
+        Look: MOUSE
+      </div>
+    </div>
+    <div class="popup" id="jsPopup" style="display: none">
+      <div class="popupText" id="jsPopupText" style="display: none"></div>
+      <div class="popupImg" id="jsPopupImg"></div>
+    </div>
+    <div class="popupVR1" id="jsPopupVR1" style="display: none">
+      <div class="popupTextVR1" id="jsPopupTextVR1" style="display: none"></div>
+      <div class="popupImgVR1" id="jsPopupImgVR1"></div>
+    </div>
+    <div class="popupVR2" id="jsPopupVR2" style="display: none">
+      <div class="popupTextVR2" id="jsPopupTextVR2" style="display: none"></div>
+      <div class="popupImgVR2" id="jsPopupImgVR2"></div>
+    </div>
+    <div class="crosshairWrapper" id="jsCrosshair" style="display: none">
+      <div class="crosshairOne"></div>
+      <div class="crosshairTwo"></div>
+    </div>
+    <div class="crosshairWrapperVR1" id="jsCrosshairVR1" style="display: none">
+      <div class="crosshairOne"></div>
+      <div class="crosshairTwo"></div>
+    </div>
+    <div class="crosshairWrapperVR2" id="jsCrosshairVR2" style="display: none">
+      <div class="crosshairOne"></div>
+      <div class="crosshairTwo"></div>
+    </div>
+
+    <script type="module">
+      import * as THREE from "./js/threejs/three.module.js";
+
+      import { PointerLockControls } from "./js/threejs/PointerLockControls.js";
+      import { MTLLoader } from "./js/threejs/loaders/MTLLoader.js";
+      import { OBJLoader } from "./js/threejs/loaders/OBJLoader.js";
+
+      import { EffectComposer } from "./js/threejs/postprocessing/EffectComposer.js";
+      import { RenderPass } from "./js/threejs/postprocessing/RenderPass.js";
+      import { ShaderPass } from "./js/threejs/postprocessing/ShaderPass.js";
+      import { OutlinePass } from "./js/threejs/postprocessing/OutlinePass.js";
+      import { FXAAShader } from "./js/threejs/shaders/FXAAShader.js";
+
+      import { VRButton } from "./js/threejs/webxr/VRButton.js";
+
+      import {
+        loadingScreen,
+        player,
+        setting,
+        setChildrenName,
+        fixPosition,
+        lerp,
+        ease,
+      } from "./js/settings.js";
+      import {
+        hiddenEvent,
+        showPopup,
+        hidePopup,
+        onKeyDown,
+        onKeyUp,
+      } from "./js/events.js";
+      import {
+        subtitlesKOR,
+        subtitlesENG,
+        getSubtitle,
+      } from "./js/subtitles.js";
+      import {
+        models,
+        blockPositions,
+        specialBlockIndex,
+      } from "./js/models.js";
+
+      const body = document.querySelector("body");
+      const language = document.getElementById("jsLanguage");
+      const korButton = document.getElementById("korButton");
+      const engButton = document.getElementById("engButton");
+      const developerMode = document.getElementById("developerMode");
+
+      const storyStart = document.getElementById("jsStoryStart");
+      const storyStartText = document.getElementById("jsStoryStartText");
+      const storyEnd = document.getElementById("jsStoryEnd");
+      const storyEndText = document.getElementById("jsStoryEndText");
+
+      const blocker = document.getElementById("blocker");
+      const instructions = document.getElementById("instructions");
+      const loading = document.getElementById("loading");
+      const loadingBar = document.getElementById("jsLoadingBar");
+      const loadingText = document.getElementById("jsLoadingText");
+      const popup = document.getElementById("jsPopup");
+      const popupText = document.getElementById("jsPopupText");
+      const crosshair = document.getElementById("jsCrosshair");
+      const crosshairVR1 = document.getElementById("jsCrosshairVR1");
+      const crosshairVR2 = document.getElementById("jsCrosshairVR2");
+      let ch = [];
+      let vrButton;
+
+      let camera, VRcamera, scene, renderer, controls;
+      let spotLight;
+      let composer, effectFXAA, outlinePass;
+      let mesh, ambientLight, light;
+      const objects = [];
+
+      let raycaster;
+      let prevTime = performance.now();
+
+      let loadingManager = null;
+      let RESOURCES_LOADED = false;
+
+      let meshes = {};
+
+      let selectedObjects = [];
+      let blocks = [];
+      let eventObj = null;
+
+      window.onload = function () {
+        preload(
+          "img/popupbg.png",
+          "img/storyStartbg.png",
+          "img/storyStartbg.png"
+        );
+      };
+
+      // preload images
+      function preload() {
+        // variables
+        var image_cache_array = new Array(),
+          i = 0;
+
+        // termination condition
+        if (!document.images) {
+          return false;
+        }
+
+        for (let key in arguments) {
+          image_cache_array[i] = new Image();
+          image_cache_array[i].src = arguments[key];
+          i++;
+        }
+
+        korButton.addEventListener("click", function () {
+          setting.korean = true;
+          init();
+        });
+        engButton.addEventListener("click", function () {
+          setting.korean = false;
+          init();
+        });
+
+        return i;
+      }
+
+      // scene setting
+      function init() {
+        storyStartText.innerHTML = getSubtitle("storyStart");
+        storyStart.style.display = "block";
+        storyStartText.style.display = "block";
+        storyStart.addEventListener("click", function () {
+          player.storyStart = true;
+          storyStart.style.display = "none";
+          storyStartText.style.display = "none";
+          if (RESOURCES_LOADED) {
+            loading.style.display = "none";
+          }
+        });
+        setting.developerMode = developerMode.checked;
+        setting.blockVisible = setting.developerMode;
+        setting.spotlight = !setting.developerMode;
+        language.style.display = "none";
+        camera = new THREE.PerspectiveCamera(
+          75,
+          window.innerWidth / window.innerHeight,
+          1,
+          1000
+        );
+        VRcamera = new THREE.PerspectiveCamera(
+          75,
+          window.innerWidth / window.innerHeight,
+          1,
+          1000
+        );
+        camera.position.set(-50, 0, 60);
+        camera.position.y = player.height;
+        camera.lookAt(0, 0, 50);
+        camera.add(VRcamera);
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000);
+        // scene.fog = new THREE.Fog(0xffffff, 0, 750);
+
+        loadingScreen.box.position.set(0, 0, 5);
+        loadingScreen.camera.lookAt(loadingScreen.box.position);
+        loadingScreen.camera.add(loadingScreen.VRcamera);
+        loadingScreen.scene.add(loadingScreen.box);
+
+        loadingManager = new THREE.LoadingManager();
+        loadingManager.onProgress = function (item, loaded, total) {
+          console.log(item, loaded, total);
+          const percentText =
+            Math.floor((loaded / total).toFixed(2) * 100) + "%";
+          loadingBar.style.width = percentText;
+          loadingText.innerHTML =
+            percentText + "  ( " + loaded + " / " + total + " )";
+        };
+        loadingManager.onLoad = function () {
+          console.log("loaded all resources");
+          RESOURCES_LOADED = true;
+          if (player.storyStart) {
+            loading.style.display = "none";
+          }
+          instructions.addEventListener(
+            "click",
+            function () {
+              controls.lock();
+            },
+            false
+          );
+          onResourcesLoaded();
+        };
+
+        for (let _key in models) {
+          (function (key) {
+            let mtlLoader = new MTLLoader(loadingManager);
+            mtlLoader.load(models[key].mtl, function (materials) {
+              materials.preload();
+
+              let objLoader = new OBJLoader(loadingManager);
+
+              objLoader.setMaterials(materials);
+              objLoader.load(models[key].obj, function (mesh) {
+                mesh.traverse(function (node) {
+                  if (node instanceof THREE.Mesh) {
+                    node.castShadow = true;
+                    node.receiveShadow = true;
+                  }
+                });
+                models[key].mesh = mesh;
+              });
+            });
+          })(_key);
+        }
+
+        const light = new THREE.HemisphereLight(
+          0xeeeeff,
+          0x777788,
+          setting.spotlight ? 0.25 : 0.75
+        );
+        light.position.set(0.5, 1, 0.75);
+        scene.add(light);
+
+        spotLight = new THREE.SpotLight(0xffffff, 0.8, 0, Math.PI / 4, 0.5, 1);
+        camera.add(spotLight.target);
+        spotLight.target.position.set(0, 0, -1);
+        spotLight.position.copy(camera.position);
+
+        if (setting.spotlight) {
+          scene.add(spotLight);
+        }
+
+        for (let i = 0; i < blockPositions.length; i++) {
+          blocks.push(
+            new THREE.Mesh(
+              new THREE.BoxGeometry(15, 15, 15),
+              new THREE.MeshPhongMaterial({
+                color: 0xff4444,
+                wireframe: setting.blockWireframe,
+              })
+            )
+          );
+          blocks[i].position.copy(blockPositions[i]);
+          blocks[i].visible = setting.blockVisible;
+          scene.add(blocks[i]);
+        }
+
+        for (let i = 0; i < blockPositions.length; i++) {}
+
+        controls = new PointerLockControls(camera, document.body);
+
+        controls.addEventListener("lock", function () {
+          setting.lock = true;
+          instructions.style.display = "none";
+          blocker.style.display = "none";
+          for (let i = 0; i < ch.length; i++) {
+            ch[i].style.display = "block";
+          }
+        });
+
+        controls.addEventListener("unlock", function () {
+          setting.lock = false;
+          blocker.style.display = "block";
+          instructions.style.display = "";
+          for (let i = 0; i < ch.length; i++) {
+            ch[i].style.display = "none";
+          }
+        });
+
+        scene.add(controls.getObject());
+
+        document.addEventListener("keydown", onKeyDown, false);
+        document.addEventListener("keyup", onKeyUp, false);
+
+        raycaster = new THREE.Raycaster(
+          new THREE.Vector3(),
+          new THREE.Vector3(0, -1, 0),
+          0,
+          70
+        );
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        document.body.appendChild(VRButton.createButton(renderer));
+        vrButton = document.getElementById("VRButton");
+        renderer.xr.enabled = true;
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        renderer.shadowMap.enabled = setting.shadow;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+        // set crosshair
+        ch.push(crosshair);
+        vrButton.addEventListener("click", function () {
+          if (setting.vr) {
+            ch = [];
+            ch.push(crosshair);
+          } else {
+            ch = [];
+            ch.push(crosshairVR1);
+            ch.push(crosshairVR2);
+          }
+        });
+
+        // postprocessing
+
+        composer = new EffectComposer(renderer);
+        const renderPass = new RenderPass(scene, camera);
+        composer.addPass(renderPass);
+
+        outlinePass = new OutlinePass(
+          new THREE.Vector2(window.innerWidth, window.innerHeight),
+          scene,
+          camera
+        );
+        composer.addPass(outlinePass);
+
+        const textureLoader = new THREE.TextureLoader(loadingManager);
+        textureLoader.load("img/tri_pattern.jpg", function (texture) {
+          outlinePass.patternTexture = texture;
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.wrapT = THREE.RepeatWrapping;
+        });
+
+        effectFXAA = new ShaderPass(FXAAShader);
+        effectFXAA.uniforms["resolution"].value.set(
+          1 / window.innerWidth,
+          1 / window.innerHeight
+        );
+        composer.addPass(effectFXAA);
+        window.addEventListener("resize", onWindowResize, false);
+
+        renderer.setAnimationLoop(animate);
+      }
+
+      // interaction with objects
+      function checkIntersection() {
+        body.removeEventListener("click", eventTrigger);
+        // VR 모드에 따라 적절한 카메라 사용
+        const currentCamera = setting.vr ? VRcamera : camera;
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), currentCamera);
+        const intersects = raycaster.intersectObject(scene, true);
+        eventObj = null;
+        if (
+          intersects.length > 0 &&
+          intersects[0].object.name != "house" &&
+          intersects[0].object.name != "" &&
+          intersects[0].object != meshes["metaldoor"].children[0]
+        ) {
+          if (popup.style.display == "none" && setting.lock) {
+            popupText.innerHTML = getSubtitle(intersects[0].object.name);
+            eventObj = intersects[0].object;
+            body.addEventListener("click", eventTrigger);
+          }
+
+          const selectedObject = intersects[0].object;
+          selectedObjects = [];
+          selectedObjects.push(selectedObject);
+          outlinePass.selectedObjects = selectedObjects;
+        } else {
+          selectedObjects = [];
+          outlinePass.selectedObjects = selectedObjects;
+        }
+      }
+
+      // set resource position, rotation
+      function onResourcesLoaded() {
+        // house
+        meshes["house"] = models.house.mesh.clone();
+        meshes["house"].children.splice(0, 1);
+        meshes["house"].position.set(-400, 250, 100);
+        meshes["house"].scale.set(200, 200, 200);
+        setChildrenName(meshes["house"], "house");
+
+        // bed
+        meshes["bed"] = models.bed.mesh.clone();
+        meshes["bed"].position.set(-59, -61, -148);
+        meshes["bed"].rotation.set(0, Math.PI / 2, 0);
+        meshes["bed"].scale.set(21, 21, 21);
+        setChildrenName(meshes["bed"], "bed");
+
+        // items
+        meshes["item"] = models.item.mesh.clone();
+        meshes["item"].children.splice(53, 1);
+        meshes["item"].children.splice(51, 1);
+        meshes["item"].children.splice(51, 1);
+        meshes["item"].children.splice(48, 1);
+        meshes["item"].children.splice(48, 1);
+        meshes["item"].position.set(230, -77, 35);
+        meshes["item"].rotation.set(0, -0.2, 0);
+        meshes["item"].scale.set(7, 7, 7);
+
+        // book
+        meshes["book"] = models.book.mesh.clone();
+        meshes["book"].position.set(291, -19, 63);
+        meshes["book"].rotation.set(-0.5, -Math.PI / 2 - 0.3, -0.5);
+        meshes["book"].scale.set(1.3, 1.3, 1.3);
+        setChildrenName(meshes["book"], "book");
+
+        //wooden cabinet
+        meshes["woodenCabinet"] = models.woodenCabinet.mesh.clone();
+        meshes["woodenCabinet"].position.set(80, -33, -196);
+        meshes["woodenCabinet"].rotation.set(0, 0, 0);
+        meshes["woodenCabinet"].scale.set(0.7, 0.7, 0.7);
+        setChildrenName(meshes["woodenCabinet"], "woodenCabinet");
+
+        // key
+        meshes["key"] = models.key.mesh.clone();
+        meshes["key"].position.set(90, -50, -206);
+        meshes["key"].rotation.set(Math.PI / 2, 0, 0);
+        meshes["key"].scale.set(30, 30, 30);
+        setChildrenName(meshes["key"], "key");
+
+        // door
+        meshes["door"] = models.door.mesh.clone();
+        meshes["door"].position.set(321, -77, -161);
+        meshes["door"].rotation.set(0, -Math.PI / 2, 0);
+        meshes["door"].scale.set(0.62, 0.5, 0.62);
+        setChildrenName(meshes["door"], "door");
+
+        // rail
+        meshes["rail"] = models.rail.mesh.clone();
+        meshes["rail"].position.set(36, -83, -25);
+        meshes["rail"].rotation.set(0, Math.PI / 2, 0);
+        meshes["rail"].scale.set(0.01, 0.02, 0.005);
+        setChildrenName(meshes["rail"], "rail");
+        meshes["rail"].children.splice(2, 1);
+
+        // metaldoor
+        meshes["metaldoor"] = models.metaldoor.mesh.clone();
+        meshes["metaldoor"].position.set(128, -50, -23);
+        meshes["metaldoor"].rotation.set(0, 0, 0);
+        meshes["metaldoor"].scale.set(43, 43, 43);
+        setChildrenName(meshes["metaldoor"], "metaldoor");
+        for (let i = 1; i <= 3; i++) {
+          meshes["metaldoor"].children[i].position.set(-2.43, 0, -2);
+          meshes["metaldoor"].children[i].rotation.set(0, -4, 0);
+        }
+
+        // cupboard
+        meshes["cupboard"] = models.cupboard.mesh.clone();
+        meshes["cupboard"].position.set(-93, -75, -126);
+        meshes["cupboard"].rotation.set(0, Math.PI, 0);
+        meshes["cupboard"].scale.set(80, 85, 80);
+        setChildrenName(meshes["cupboard"], "cupboard");
+
+        // axe
+        meshes["axe"] = models.axe.mesh.clone();
+        meshes["axe"].position.set(10, -65, -180);
+        meshes["axe"].rotation.set(0, Math.PI / 5, 0.6);
+        meshes["axe"].scale.set(0.7, 0.7, 0.7);
+        setChildrenName(meshes["axe"], "axe");
+
+        // corpse
+        meshes["corpse"] = models.corpse.mesh.clone();
+        meshes["corpse"].position.set(-56, -37, -147);
+        meshes["corpse"].rotation.set(0, (Math.PI * 9) / 8, 0);
+        meshes["corpse"].scale.set(0.6, 0.6, 0.6);
+        setChildrenName(meshes["corpse"], "corpse");
+
+        // barrier
+        meshes["barrier"] = models.barrier.mesh.clone();
+        meshes["barrier"].position.set(183, -77, -178);
+        meshes["barrier"].rotation.set(0, Math.PI / 3, 0);
+        meshes["barrier"].scale.set(0.3, 0.3, 0.3);
+        setChildrenName(meshes["barrier"], "barrier");
+
+        for (const [key, value] of Object.entries(meshes)) {
+          scene.add(value);
+        }
+      }
+
+      function onWindowResize() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(width, height);
+        composer.setSize(width, height);
+
+        effectFXAA.uniforms["resolution"].value.set(
+          1 / window.innerWidth,
+          1 / window.innerHeight
+        );
+      }
+
+      function animate() {
+        // game clear
+        if (player.doorOpen && camera.position.x > 333) {
+          storyEndText.innerHTML = getSubtitle("storyEnd");
+          storyEnd.style.display = "block";
+          storyEndText.style.display = "block";
+          controls.unlock();
+          return;
+        }
+
+        // set vr status
+        if (vrButton.innerHTML == "ENTER VR") {
+          setting.vr = false;
+          outlinePass.camera = camera;
+        } else {
+          setting.vr = true;
+          outlinePass.camera = VRcamera;
+        }
+
+        // loading
+        if (RESOURCES_LOADED == false) {
+          loadingScreen.box.position.x -= 0.05;
+          if (loadingScreen.box.position.x < -10)
+            loadingScreen.box.position.x = 10;
+          loadingScreen.box.position.y = Math.sin(loadingScreen.box.position.x);
+
+          if (!setting.vr) {
+            renderer.render(loadingScreen.scene, loadingScreen.camera);
+          } else {
+            renderer.render(loadingScreen.scene, loadingScreen.VRcamera);
+          }
+          return;
+        }
+
+        const time = performance.now();
+
+        const previousPosition = camera.position.clone();
+
+        if (controls.isLocked === true || setting.vr == true) {
+          // cupboard event
+          if (hiddenEvent.start) {
+            const newX = lerp(
+              hiddenEvent.startX,
+              hiddenEvent.endX,
+              ease(hiddenEvent.t)
+            );
+            meshes["cupboard"].position.x = newX;
+            hiddenEvent.t += hiddenEvent.dt;
+            if (hiddenEvent.t <= 0 || hiddenEvent.t >= 1)
+              hiddenEvent.dt = -hiddenEvent.dt;
+            if (meshes["cupboard"].position.x == hiddenEvent.endX)
+              hiddenEvent.start = false;
+          }
+
+          raycaster.ray.origin.copy(controls.getObject().position);
+          raycaster.ray.origin.y -= 10;
+
+          const intersections = raycaster.intersectObjects(objects);
+
+          const onObject = intersections.length > 0;
+
+          const delta = (time - prevTime) / 1000;
+
+          player.velocity.x -= player.velocity.x * 10.0 * delta;
+          player.velocity.z -= player.velocity.z * 10.0 * delta;
+
+          player.velocity.y -= 9.8 * 100.0 * delta; // 100.0 = mass
+
+          player.direction.z =
+            Number(player.moveForward) - Number(player.moveBackward);
+          player.direction.x =
+            Number(player.moveRight) - Number(player.moveLeft);
+          player.direction.normalize(); // this ensures consistent movements in all directions
+
+          if (player.moveForward || player.moveBackward)
+            player.velocity.z -= player.direction.z * player.speed * delta;
+          if (player.moveLeft || player.moveRight)
+            player.velocity.x -= player.direction.x * player.speed * delta;
+
+          controls.moveRight(-player.velocity.x * delta);
+          controls.moveForward(-player.velocity.z * delta);
+
+          if (!setting.developerMode) {
+            for (let i = 0; i < blocks.length; i++) {
+              if (player.doorOpen && specialBlockIndex.door.includes(i)) {
+                continue;
+              } else if (
+                player.metaldoorOpen &&
+                specialBlockIndex.metaldoor.includes(i)
+              ) {
+                continue;
+              } else if (
+                player.moveCupboard &&
+                specialBlockIndex.cupboardBefore.includes(i)
+              ) {
+                continue;
+              } else if (
+                !player.moveCupboard &&
+                specialBlockIndex.cupboardAfter.includes(i)
+              ) {
+                continue;
+              } else if (
+                camera.position.distanceTo(
+                  new THREE.Vector3(
+                    blocks[i].position.x,
+                    0,
+                    blocks[i].position.z
+                  )
+                ) < 15
+              ) {
+                camera.position.copy(previousPosition);
+              }
+            }
+          }
+          if (!setting.lock) {
+            camera.position.copy(previousPosition);
+          }
+        }
+        prevTime = time;
+
+        for (const [key, value] of Object.entries(meshes)) {
+          let distance = camera.position.distanceTo(value.position);
+        }
+        checkIntersection();
+        fixPosition(camera);
+
+        // handle spotlight
+        if (setting.spotlight) {
+          spotLight.target.position.set(0, 0, -1);
+          spotLight.position.copy(camera.position);
+        }
+
+        // rendering
+        if (!setting.vr) {
+          renderer.render(scene, camera);
+          composer.render();
+        } else {
+          // VR 모드에서도 outline 효과를 위해 composer 사용
+          composer.render();
+        }
+      }
+
+      // handle events
+      function eventTrigger() {
+        //console.log("click: " + eventObj.name + ", index: " + eventObj.parent.children.indexOf(eventObj));
+        if (
+          eventObj.name == "woodenCabinet" &&
+          eventObj != meshes["woodenCabinet"].children[4]
+        ) {
+          if (eventObj.position.z == 30) {
+            eventObj.position.z = 0; // close cabinet (with key)
+            if (eventObj == meshes["woodenCabinet"].children[2])
+              meshes["key"].position.z = -206;
+            return;
+          } else {
+            popupText.innerHTML = getSubtitle("openWoodenCabinet");
+            eventObj.position.z = 30; // open cabinet (with key)
+            if (eventObj == meshes["woodenCabinet"].children[2])
+              meshes["key"].position.z = -176;
+          }
+        } else if (eventObj.name == "key") {
+          // get key
+          if (player.hasKey) {
+            return;
+          } else {
+            eventObj.visible = false;
+            player.hasKey = true;
+          }
+        } else if (eventObj.name == "door") {
+          if (player.hasKey) {
+            // door open
+            popupText.innerHTML = getSubtitle("doorOpen");
+            meshes["door"].position.set(293, -77, -110);
+            meshes["door"].rotation.set(0, Math.PI / 6, 0);
+            player.doorOpen = true;
+          } else {
+            player.seeDoor = true;
+          }
+        } else if (eventObj.name == "metaldoor" && player.seeDoor) {
+          // open and close metal door
+          popupText.innerHTML = getSubtitle("metaldoorTwo");
+          if (meshes["metaldoor"].children[1].rotation.y == -4) {
+            if (eventObj != meshes["metaldoor"].children[1]) {
+              for (let i = 1; i <= 3; i++) {
+                meshes["metaldoor"].children[i].position.set(0, 0, 0);
+                meshes["metaldoor"].children[i].rotation.set(0, 0, 0);
+              }
+              player.metaldoorOpen = true;
+              popupText.innerHTML = getSubtitle("metaldoorOpen");
+            }
+          } else {
+            for (let i = 1; i <= 3; i++) {
+              meshes["metaldoor"].children[i].position.set(-2.43, 0, -2);
+              meshes["metaldoor"].children[i].rotation.set(0, -4, 0);
+            }
+            player.metaldoorOpen = false;
+            return;
+          }
+        } else if (eventObj.name == "book") {
+          // set book's subtitle
+          if (player.seeCupboard) {
+            player.readDiary = true;
+            popupText.innerHTML = getSubtitle("diary");
+          } else {
+            player.seeDiary = true;
+          }
+        } else if (eventObj.name == "cupboard") {
+          // set cupboard event handler
+          if (player.readDiary) {
+            hiddenEvent.start = true;
+            player.moveCupboard = true;
+            popupText.innerHTML = getSubtitle("cupboardMove");
+          } else if (player.seeDiary) {
+            player.seeCupboard = true;
+            popupText.innerHTML = getSubtitle("seeCupboard");
+          }
+        } else if (eventObj == meshes["corpse"].children[0]) {
+          // corpse wire subtitle
+          popupText.innerHTML = getSubtitle("corpseWire");
+        }
+        showPopup();
+      }
+    </script>
+  </body>
+</html>
